@@ -45,12 +45,6 @@ namespace Nerdbank.GitVersioning.ManagedGit
 
         private Lazy<GitPackIndexReader> indexReader;
 
-        // Operating on git packfiles can potentially open a lot of streams which point to the pack file. For example,
-        // deltafied objects can have base objects which are in turn delafied. Opening and closing these streams has
-        // become a performance bottleneck. This is mitigated by pooling streams (i.e. reusing the streams after they
-        // are closed by the caller).
-        private readonly Queue<GitPackPooledStream> pooledStreams = new Queue<GitPackPooledStream>();
-
         /// <summary>
         /// Initializes a new instance of the <see cref="GitPack"/> class.
         /// </summary>
