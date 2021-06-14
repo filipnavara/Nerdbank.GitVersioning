@@ -23,22 +23,6 @@ namespace Nerdbank.GitVersioning.ManagedGit
                 throw new ArgumentNullException(nameof(stream));
             }
 
-            // Read the signature
-#if DEBUG
-            stream.Seek(0, SeekOrigin.Begin);
-            Span<byte> buffer = stackalloc byte[12];
-            stream.ReadAll(buffer);
-
-            Debug.Assert(buffer.Slice(0, 4).SequenceEqual(Signature));
-
-            var versionNumber = BinaryPrimitives.ReadInt32BigEndian(buffer.Slice(4, 4));
-            Debug.Assert(versionNumber == 2);
-
-            var numberOfObjects = BinaryPrimitives.ReadInt32BigEndian(buffer.Slice(8, 4));
-#endif
-
-            stream.Seek(offset, SeekOrigin.Begin);
-
             var (type, decompressedSize) = ReadObjectHeader(stream);
 
             if (type == GitPackObjectType.OBJ_OFS_DELTA)
@@ -73,7 +57,7 @@ namespace Nerdbank.GitVersioning.ManagedGit
             return new ZLibStream(stream, decompressedSize);
         }
 
-        private static (GitPackObjectType, long) ReadObjectHeader(Stream stream)
+        public static (GitPackObjectType, long) ReadObjectHeader(Stream stream)
         {
             Span<byte> value = stackalloc byte[1];
             stream.Read(value);

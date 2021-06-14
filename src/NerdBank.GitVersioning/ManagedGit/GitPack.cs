@@ -14,6 +14,8 @@ namespace Nerdbank.GitVersioning.ManagedGit
     /// </summary>
     public class GitPack : IDisposable
     {
+        private const int SmallObjectSize = 8192;
+
         /// <summary>
         /// A delegate for methods which fetch objects from the Git object store.
         /// </summary>
@@ -32,7 +34,7 @@ namespace Nerdbank.GitVersioning.ManagedGit
         private readonly Lazy<FileStream> indexStream;
         private readonly GitPackCache cache;
         private MemoryMappedFile packFile;
-        private MemoryMappedViewAccessor accessor;
+        private long packFileSize;
 
         // Maps GitObjectIds to offets in the git pack.
         private readonly Dictionary<GitObjectId, long> offsets = new Dictionary<GitObjectId, long>();
@@ -92,8 +94,9 @@ namespace Nerdbank.GitVersioning.ManagedGit
             this.indexStream = indexStream ?? throw new ArgumentNullException(nameof(indexStream));
             this.cache = cache ?? new GitPackMemoryCache();
 
-            this.packFile = MemoryMappedFile.CreateFromFile(this.packStream(), mapName: null, 0, MemoryMappedFileAccess.Read, HandleInheritability.None, leaveOpen: false);
-            this.accessor = this.packFile.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
+            var stream = this.packStream();
+            this.packFileSize = stream.Length;
+            this.packFile = MemoryMappedFile.CreateFromFile(stream, mapName: null, this.packFileSize, MemoryMappedFileAccess.Read, HandleInheritability.None, leaveOpen: false);
         }
 
         /// <summary>
@@ -195,7 +198,21 @@ namespace Nerdbank.GitVersioning.ManagedGit
                     throw new GitException($"The object type '{objectType}' is not supported by the {nameof(GitPack)} class.");
             }
 
-            var packStream = this.GetPackStream();
+            var headerStream = this.GetPackStream(offset, Math.Min(this.packFileSize - offset, SmallObjectSize));
+            var (type, length) = GitPackReader.ReadObjectHeader(headerStream);
+            Stream packStream;
+
+            if (length <= headerStream.Length || type == GitPackObjectType.OBJ_OFS_DELTA || type == GitPackObjectType.OBJ_REF_DELTA)
+            {
+                packStream = headerStream;
+                headerStream.Position = 0;
+            }
+            else
+            {
+                headerStream.Close();
+                packStream = this.GetPackStream(offset, length);
+            }
+
             Stream objectStream = GitPackReader.GetObject(this, packStream, offset, objectType, packObjectType);
 
             return this.cache.Add(offset, objectStream);
@@ -234,7 +251,6 @@ namespace Nerdbank.GitVersioning.ManagedGit
                 this.indexReader.Value.Dispose();
             }
 
-            this.accessor.Dispose();
             this.packFile.Dispose();
             this.cache.Dispose();
         }
@@ -257,9 +273,9 @@ namespace Nerdbank.GitVersioning.ManagedGit
             return offset;
         }
 
-        private Stream GetPackStream()
+        private Stream GetPackStream(long offset, long size)
         {
-            return new MemoryMappedStream(this.accessor);
+            return this.packFile.CreateViewStream(offset, size, MemoryMappedFileAccess.Read);
         }
 
         private GitPackIndexReader OpenIndex()
